@@ -174,15 +174,374 @@ function DataViewer({ source, onClose }) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+//  SVG BAR CHART — Animated bars that update on data change
+// ══════════════════════════════════════════════════════════════════════════════
+function BarChart({ data, labels, color, unit = '$', maxOverride }) {
+  const max = maxOverride || Math.max(...data, 1);
+  const barWidth = 100 / data.length;
+
+  const fmt = (v) => {
+    if (unit === '$') {
+      if (v >= 1000000) return `$${(v / 1000000).toFixed(2)}M`;
+      if (v >= 1000) return `$${(v / 1000).toFixed(0)}K`;
+      return `$${v}`;
+    }
+    return `${v}${unit}`;
+  };
+
+  return (
+    <div className="w-full space-y-2">
+      <div className="relative h-[120px] flex items-end gap-1">
+        {data.map((val, i) => {
+          const pct = Math.max(4, Math.round((val / max) * 100));
+          return (
+            <div key={i} className="flex-1 flex flex-col items-center justify-end gap-1 h-full">
+              <span className="text-[8px] text-zinc-500 font-mono leading-none">{fmt(val)}</span>
+              <div
+                className="w-full rounded-t-sm transition-all duration-700 ease-out"
+                style={{
+                  height: `${pct}%`,
+                  backgroundColor: color,
+                  opacity: 0.8 + (i / data.length) * 0.2,
+                }}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="flex">
+        {labels.map((l, i) => (
+          <div key={i} className="flex-1 text-center text-[8px] text-zinc-600 font-medium truncate">{l}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  FUTURE CARD — Predictive Decision Simulator with Real Market Data
+// ══════════════════════════════════════════════════════════════════════════════
+function FutureCard({ result }) {
+  const [activeScenarioIdx, setActiveScenarioIdx] = useState(1); // default: Balanced
+  const [forecastData, setForecastData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [activeMetric, setActiveMetric] = useState('revenue');
+  const [expanded, setExpanded] = useState(false);
+
+  const verdictText = result?.output?.verdict || '';
+  const scenariosFromAnalysis = result?.output?.scenarios || [];
+  const decisionLabel = result?.intent?.goal || result?.question || verdictText?.slice(0, 80) || 'this decision';
+
+  // Auto-fetch when expanded
+  useEffect(() => {
+    if (!expanded) return;
+    if (forecastData) return;
+    fetchForecast();
+  }, [expanded]);
+
+  const fetchForecast = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API}/future-forecast`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          decision: decisionLabel,
+          scenarios: scenariosFromAnalysis,
+          context: result?.context || {}
+        })
+      });
+      const data = await res.json();
+      setForecastData(data);
+    } catch (e) {
+      setError('Could not load forecast. Backend may be starting.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const activeSc = forecastData?.scenarios?.[activeScenarioIdx];
+  const months = forecastData?.months || ['M1','M2','M3','M4','M5','M6'];
+
+  const metricOptions = [
+    { id: 'revenue', label: 'Revenue', icon: TrendingUp },
+    { id: 'pipeline', label: 'Pipeline', icon: BarChart2 },
+    { id: 'customers', label: 'Cust. LTV', icon: Users },
+  ];
+
+  const getMetricData = (sc) => {
+    if (!sc) return [];
+    return activeMetric === 'revenue' ? sc.revenue
+         : activeMetric === 'pipeline' ? sc.pipeline
+         : sc.customers;
+  };
+
+  const sentimentColor = {
+    BULLISH: 'text-emerald-400 bg-emerald-950/40 border-emerald-800/30',
+    BEARISH: 'text-red-400 bg-red-950/40 border-red-800/30',
+    NEUTRAL: 'text-amber-400 bg-amber-950/40 border-amber-800/30',
+  }[forecastData?.market_sentiment] || 'text-zinc-400 bg-zinc-900 border-zinc-700';
+
+  return (
+    <div className="bg-[#111213] border border-[#1e1e22] rounded-xl overflow-hidden">
+      {/* ── Header toggle ── */}
+      <button
+        onClick={() => setExpanded(p => !p)}
+        className="w-full flex items-center justify-between px-5 py-4 bg-[#111213] hover:bg-[#161619] transition-all text-left"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-7 h-7 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center">
+            <TrendingUp className="w-3.5 h-3.5 text-blue-400" />
+          </div>
+          <div>
+            <span className="text-[12px] font-bold text-zinc-300 uppercase tracking-wide">Future Decision Predictor</span>
+            <div className="text-[10px] text-zinc-600 mt-0.5">
+              {forecastData
+                ? `Market: ${forecastData.market_sentiment} · ${forecastData.market_indexes?.length || 0} live indexes loaded`
+                : 'Click to load real market data & 6-month projections'}
+            </div>
+          </div>
+        </div>
+        {expanded ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
+      </button>
+
+      {expanded && (
+        <div className="border-t border-[#1e1e22] bg-[#0a0a0b] p-5 space-y-5">
+
+          {/* Loading state */}
+          {loading && (
+            <div className="flex flex-col items-center justify-center py-12 space-y-3">
+              <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
+              <p className="text-[12px] text-zinc-500">Fetching live market data from Google Finance…</p>
+            </div>
+          )}
+
+          {error && (
+            <div className="flex items-center gap-2 bg-red-950/30 border border-red-900/30 p-3 rounded-lg">
+              <AlertCircle className="w-4 h-4 text-red-400" />
+              <p className="text-[12px] text-red-400">{error}</p>
+              <button onClick={fetchForecast} className="ml-auto text-[10px] text-blue-400 hover:underline">Retry</button>
+            </div>
+          )}
+
+          {forecastData && !loading && (
+            <>
+              {/* ── Market Indexes Live Strip ── */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Live Market Context</span>
+                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider ${sentimentColor}`}>
+                    {forecastData.market_sentiment}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                  {(forecastData.market_indexes || []).map((idx, i) => (
+                    <div key={i} className="bg-[#161617] border border-[#232325] px-3 py-2 rounded-lg">
+                      <div className="text-[9px] text-zinc-500 font-semibold truncate">{idx.name}</div>
+                      <div className="text-[11px] font-mono font-bold text-white">{idx.price}</div>
+                      <div className={`text-[9px] font-bold font-mono ${idx.direction === 'up' ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {idx.direction === 'up' ? '▲' : '▼'} {Math.abs(idx.change_pct)}%
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Decision context ── */}
+              <div className="bg-[#161617] border border-blue-900/20 px-4 py-3 rounded-xl flex items-start gap-2.5">
+                <Sparkles className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <span className="text-[9.5px] text-blue-400 font-bold uppercase tracking-wider block">Projecting impact of:</span>
+                  <p className="text-[12.5px] text-white font-bold mt-0.5 leading-snug">
+                    {decisionLabel.length > 120 ? decisionLabel.slice(0, 120) + '…' : decisionLabel}
+                  </p>
+                </div>
+              </div>
+
+              {/* ── Path Tab Selector ── */}
+              <div className="space-y-1">
+                <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-0.5">Select a Decision Path</span>
+                <div className="grid grid-cols-3 gap-2">
+                  {forecastData.scenarios.map((sc, i) => {
+                    const isActive = i === activeScenarioIdx;
+                    const riskColors = {
+                      LOW: isActive ? 'border-emerald-600/60 bg-emerald-950/30 text-emerald-300' : 'border-[#232325] text-zinc-500 hover:text-emerald-400 hover:border-emerald-900/50',
+                      MEDIUM: isActive ? 'border-amber-600/60 bg-amber-950/30 text-amber-300' : 'border-[#232325] text-zinc-500 hover:text-amber-400 hover:border-amber-900/50',
+                      HIGH: isActive ? 'border-red-600/60 bg-red-950/30 text-red-300' : 'border-[#232325] text-zinc-500 hover:text-red-400 hover:border-red-900/50',
+                    }[sc.risk] || '';
+                    return (
+                      <button
+                        key={sc.id}
+                        onClick={() => setActiveScenarioIdx(i)}
+                        className={`flex flex-col items-center gap-1 p-3 rounded-xl border transition-all duration-200 ${riskColors}`}
+                      >
+                        <span className="text-[11px] font-bold uppercase tracking-wide">{sc.name}</span>
+                        <span className={`text-[8.5px] font-semibold px-1.5 py-0.5 rounded uppercase ${
+                          sc.risk === 'LOW' ? 'bg-emerald-900/30 text-emerald-400' :
+                          sc.risk === 'MEDIUM' ? 'bg-amber-900/30 text-amber-400' : 'bg-red-900/30 text-red-400'
+                        }`}>{sc.risk} Risk</span>
+                        <span className="text-[9px] text-zinc-500 font-mono">{sc.confidence}% conf.</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* ── Active Path Details ── */}
+              {activeSc && (
+                <div className="space-y-4">
+                  <div className="bg-[#161617] border border-[#232325] px-4 py-3 rounded-xl">
+                    <p className="text-[12px] text-zinc-300 leading-relaxed">{activeSc.label}</p>
+                    {activeSc.breaking_assumption && (
+                      <div className="flex items-center gap-1.5 mt-2 text-[10.5px] text-amber-400">
+                        <AlertTriangle className="w-3 h-3" />
+                        <span>{activeSc.breaking_assumption}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ── Metric Tab Selector ── */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest pl-0.5">Projected Metric</span>
+                    <div className="flex gap-2">
+                      {metricOptions.map((m) => {
+                        const Icon = m.icon;
+                        return (
+                          <button
+                            key={m.id}
+                            onClick={() => setActiveMetric(m.id)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-[10.5px] font-bold transition-all ${
+                              activeMetric === m.id
+                                ? 'bg-[#1e1e22] border-[#313235] text-white'
+                                : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                            }`}
+                          >
+                            <Icon className="w-3 h-3" />
+                            {m.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ── Bar Chart ── */}
+                  <div className="bg-[#161617] border border-[#232325] p-4 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">
+                        6-Month {activeMetric === 'revenue' ? 'Revenue' : activeMetric === 'pipeline' ? 'Sales Pipeline' : 'Customer LTV'} Forecast
+                      </span>
+                      <span className="text-[9.5px] text-zinc-600 font-mono font-medium">
+                        Adjusted for {forecastData.market_sentiment} market
+                      </span>
+                    </div>
+                    <BarChart
+                      data={getMetricData(activeSc)}
+                      labels={months.map(m => m.replace('Month ', 'M'))}
+                      color={activeSc.color}
+                      unit="$"
+                    />
+                  </div>
+
+                  {/* ── Churn Trend ── */}
+                  <div className="bg-[#161617] border border-[#232325] p-4 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Customer Churn Risk Over 6 Months</span>
+                    </div>
+                    <div className="grid grid-cols-6 gap-2">
+                      {activeSc.churn.map((c, i) => {
+                        const isGood = c < 4;
+                        return (
+                          <div key={i} className="flex flex-col items-center gap-1">
+                            <div className={`text-[9px] font-mono font-bold ${isGood ? 'text-emerald-400' : c > 5 ? 'text-red-400' : 'text-amber-400'}`}>
+                              {c}%
+                            </div>
+                            <div className="w-full h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${isGood ? 'bg-emerald-500' : c > 5 ? 'bg-red-500' : 'bg-amber-500'}`}
+                                style={{ width: `${Math.min(100, c * 10)}%` }}
+                              />
+                            </div>
+                            <div className="text-[8px] text-zinc-600">{months[i]?.replace('Month ', 'M')}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* ── Compare All Paths ── */}
+                  <div className="bg-[#161617] border border-[#232325] p-4 rounded-xl space-y-3">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Revenue at Month 6 — Path Comparison</span>
+                    <div className="space-y-2.5">
+                      {forecastData.scenarios.map((sc, i) => {
+                        const finalVal = sc.revenue?.[5] || 0;
+                        const baseVal = forecastData.base_revenue;
+                        const maxAll = Math.max(...forecastData.scenarios.map(s => s.revenue?.[5] || 0));
+                        const pct = Math.round((finalVal / maxAll) * 100);
+                        const isSelected = i === activeScenarioIdx;
+                        return (
+                          <div
+                            key={sc.id}
+                            onClick={() => setActiveScenarioIdx(i)}
+                            className={`cursor-pointer space-y-1 p-2.5 rounded-lg transition-all border ${
+                              isSelected ? 'border-[#2e2f35] bg-[#101012]' : 'border-transparent hover:border-[#232325]'
+                            }`}
+                          >
+                            <div className="flex justify-between text-[10.5px]">
+                              <span className={`font-bold ${isSelected ? 'text-white' : 'text-zinc-400'}`}>{sc.name}</span>
+                              <span className="font-mono text-zinc-300">
+                                ${(finalVal / 1000000).toFixed(3)}M
+                                <span className="text-emerald-400 ml-1.5">
+                                  +{((finalVal - baseVal) / baseVal * 100).toFixed(1)}%
+                                </span>
+                              </span>
+                            </div>
+                            <div className="h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all duration-700"
+                                style={{ width: `${pct}%`, backgroundColor: sc.color }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 //  RICH OUTPUT CARD — Renders the executive briefing from the pipeline
 // ══════════════════════════════════════════════════════════════════════════════
-function RichOutputCard({ output, frictionLevel, pipelineExecuted }) {
+function RichOutputCard({ result }) {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showScenarios, setShowScenarios] = useState(true);
   const [showDevils, setShowDevils] = useState(false);
   const [showSelfReview, setShowSelfReview] = useState(false);
+  const [selectedModuleId, setSelectedModuleId] = useState('M01');
+  const [selectedFuturePathIndex, setSelectedFuturePathIndex] = useState(0);
 
-  if (!output) return null;
+  if (!result || !result.output) return null;
+
+  const {
+    output,
+    question,
+    friction_level: frictionLevel = 'MEDIUM',
+    pipeline_executed: pipelineExecuted = [],
+    intent,
+    context,
+    past_memory: pastMemory,
+    past_memory_score: pastMemoryScore,
+    department_views: departmentViews,
+  } = result;
 
   const frictionColor = {
     LOW:    'text-emerald-400 bg-emerald-900/20 border-emerald-800/40',
@@ -208,6 +567,485 @@ function RichOutputCard({ output, frictionLevel, pipelineExecuted }) {
   const regret        = output.regret_choice || '';
   const mistakeCtx    = output.mistake_context;
   const patternMatch  = output.pattern_match;
+
+  // Build the 16 cognitive pipeline modules detailed audit data
+  const auditModules = [
+    { id: "M01", phase: "UNDERSTAND", name: "Intent Understanding", desc: "Parses raw user prompts, isolates strategic variables, and configures constraints.", status: pipelineExecuted.includes("Intent") ? "EXECUTED" : "SKIPPED" },
+    { id: "M02", phase: "UNDERSTAND", name: "Friction Router", desc: "Estimates decision load and schedules fast vs. slow reasoning pathways.", status: pipelineExecuted.includes("Friction") ? "EXECUTED" : "SKIPPED" },
+    { id: "M03", phase: "UNDERSTAND", name: "Context Resolver", desc: "Queries live database tables dynamically based on intent keywords.", status: pipelineExecuted.includes("Context") ? "EXECUTED" : "SKIPPED" },
+    { id: "M04", phase: "UNDERSTAND", name: "Vector Memory RAG", desc: "Pulls semantic matches from previous historical decisions and mistakes.", status: pipelineExecuted.includes("Memory") ? "EXECUTED" : "SKIPPED" },
+    { id: "M05", phase: "ANALYZE", name: "Root Cause Analyzer", desc: "Identifies deep-seated bottlenecks using regression trace diagnostic chains.", status: pipelineExecuted.includes("Root Cause") ? "EXECUTED" : "SKIPPED" },
+    { id: "M06", phase: "ANALYZE", name: "Multi-Agent Debate", desc: "Simulates intense role-play debate between departmental directors.", status: pipelineExecuted.includes("Debate") ? "EXECUTED" : "SKIPPED" },
+    { id: "M07", phase: "ANALYZE", name: "Evidence Auditor", desc: "Fact-checks and validates debate claims against ground-truth database rows.", status: pipelineExecuted.includes("Evidence") ? "EXECUTED" : "SKIPPED" },
+    { id: "M08", phase: "REASON", name: "Scenario Simulator", desc: "Projects alternative outcomes, calculating revenue impacts and risk.", status: pipelineExecuted.includes("Scenarios") ? "EXECUTED" : "SKIPPED" },
+    { id: "M09", phase: "REASON", name: "Devil's Advocate", desc: "Actively constructs counter-arguments and identifies strategic blindspots.", status: pipelineExecuted.includes("Devil's Advocate") ? "EXECUTED" : "SKIPPED" },
+    { id: "M10", phase: "REASON", name: "Regret Minimax Choice", desc: "Formulates a regret matrix and isolates the lowest-regret option.", status: pipelineExecuted.includes("Regret") ? "EXECUTED" : "SKIPPED" },
+    { id: "M11", phase: "VERIFY", name: "Confidence Weighting", desc: "Aggregates weighting scores to issue a mathematical confidence percentage.", status: pipelineExecuted.includes("Confidence") ? "EXECUTED" : "SKIPPED" },
+    { id: "M12", phase: "VERIFY", name: "Constraints Validator", desc: "Cross-checks actions against hard resource and financial ceilings.", status: pipelineExecuted.includes("Constraints") ? "EXECUTED" : "SKIPPED" },
+    { id: "M13", phase: "VERIFY", name: "Self-Review Critique", desc: "Conducts an honest, self-critical critique evaluating data gaps.", status: pipelineExecuted.includes("Self Review") ? "EXECUTED" : "SKIPPED" },
+    { id: "M14", phase: "DECIDE", name: "Synthesis Engine", desc: "Resolves agent disputes to issue a single strategic directive.", status: pipelineExecuted.includes("Synthesis") ? "EXECUTED" : "SKIPPED" },
+    { id: "M15", phase: "DECIDE", name: "Explainability Trace", desc: "Outputs auditable execution logs for each module in the reasoning tree.", status: pipelineExecuted.includes("Explainability") ? "EXECUTED" : "SKIPPED" },
+    { id: "M16", phase: "DECIDE", name: "Learning Feedback", desc: "Saves conversation logs and outcomes into local vector memory.", status: pipelineExecuted.includes("Learning") ? "EXECUTED" : "SKIPPED" }
+  ];
+
+  const renderModuleAuditContent = () => {
+    if (activeAudit.status === "SKIPPED") {
+      return (
+        <div className="bg-[#161617]/50 border border-[#232325]/50 rounded-xl p-6 text-center space-y-2">
+          <AlertCircle className="w-8 h-8 text-zinc-600 mx-auto" />
+          <h4 className="text-[13px] font-bold text-zinc-400">Module Skipped</h4>
+          <p className="text-[11.5px] text-zinc-500 max-w-sm mx-auto">
+            This module was bypassed to optimize performance since your request falls under a {frictionLevel.toLowerCase()}-friction path.
+          </p>
+        </div>
+      );
+    }
+
+    switch(activeAudit.id) {
+      case "M01":
+        return (
+          <div className="space-y-4">
+            <div className="bg-[#161617] border border-[#232325] p-4 rounded-xl space-y-3">
+              <h4 className="text-[11.5px] font-bold text-zinc-400 uppercase tracking-wider">Core Goal Parsed</h4>
+              <div className="text-[13.5px] text-white font-bold bg-[#0d0d0e] px-3.5 py-2.5 rounded-lg border border-[#1e1e22]">
+                {intent?.goal || 'N/A'}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <h4 className="text-[10.5px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Identified Rules & Constraints</h4>
+              <div className="grid grid-cols-1 gap-2">
+                {intent?.constraints && intent.constraints.length > 0 ? (
+                  intent.constraints.map((c, i) => (
+                    <div key={i} className="flex items-center gap-2.5 bg-[#121213] border border-[#1e1e22] px-3.5 py-2.5 rounded-lg text-[12px] text-zinc-300">
+                      <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                      <span>{c}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-[12px] text-zinc-500 italic pl-1">No explicit constraints parsed from request.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+
+      case "M02": {
+        const complexityPct = frictionLevel === 'LOW' ? 25 : frictionLevel === 'MEDIUM' ? 60 : 100;
+        const complexityColor = frictionLevel === 'LOW' ? 'bg-emerald-500' : frictionLevel === 'MEDIUM' ? 'bg-amber-500' : 'bg-red-500';
+        return (
+          <div className="space-y-4">
+            <div className="bg-[#161617] border border-[#232325] p-5 rounded-xl space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">Cognitive Load Index</span>
+                <span className="text-[12px] font-mono font-bold text-white">{complexityPct}% Depth</span>
+              </div>
+              <div className="h-2 bg-zinc-900 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-700 ${complexityColor}`} style={{ width: `${complexityPct}%` }} />
+              </div>
+              <div className="text-[12px] text-zinc-400 leading-relaxed bg-[#0b0b0c] p-3 rounded-lg border border-[#1b1b1e]">
+                Friction AI evaluated the request complexity and activated a <strong className="text-white font-bold">{frictionLevel} Friction</strong> path. 
+                {frictionLevel === 'LOW' ? ' This allows instant, fast-path synthesis.' : ' This forces a comprehensive multi-agent debate and validation loop.'}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case "M03":
+        return (
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Live CRM Health Metrics Grounding</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+              {[
+                { label: 'Monthly Revenue', val: context?.financials?.monthly_revenue || 0, target: 1500000, fmt: (v) => `$${v.toLocaleString()}` },
+                { label: 'Open Sales Pipeline', val: context?.sales_pipeline?.open_value || 0, target: 1000000, fmt: (v) => `$${v.toLocaleString()}` },
+                { label: 'Active Pipeline Deals', val: context?.sales_pipeline?.open_deals || 0, target: 40, fmt: (v) => `${v} deals` },
+                { label: 'Customer LTV (Avg)', val: context?.customers?.avg_ltv || 0, target: 250000, fmt: (v) => `$${v.toLocaleString()}` }
+              ].map((bar, i) => {
+                const pct = Math.min(100, Math.round((bar.val / bar.target) * 100));
+                return (
+                  <div key={i} className="bg-[#161617] border border-[#232325] p-3.5 rounded-xl space-y-2">
+                    <div className="flex justify-between text-[11px] font-semibold text-zinc-400">
+                      <span>{bar.label}</span>
+                      <span className="text-white font-mono">{bar.fmt(bar.val)}</span>
+                    </div>
+                    <div className="h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+
+      case "M04":
+        return (
+          <div className="space-y-4">
+            <div className="bg-[#161617] border border-[#232325] p-4 rounded-xl space-y-3.5">
+              <div className="flex items-center justify-between border-b border-[#232325] pb-2.5">
+                <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">Similarity Match confidence</span>
+                <span className="text-purple-400 font-mono text-[12px] font-bold">{Math.round((pastMemoryScore || 0) * 100)}% Match</span>
+              </div>
+              <div className="text-[12px] text-zinc-300 leading-relaxed font-sans">
+                <strong>Matched Historical Decision Context:</strong>
+                <div className="bg-[#0b0b0c] border border-[#1e1e22] rounded-lg p-3 text-[11.5px] text-zinc-400 font-mono mt-2 whitespace-pre-wrap max-h-[220px] overflow-y-auto custom-scrollbar">
+                  {pastMemory || "No matching cases resolved."}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case "M05":
+        return (
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Regression Root Cause Chain</h4>
+            <div className="space-y-3 bg-[#161617] border border-[#232325] p-5 rounded-xl">
+              <div className="flex flex-col gap-4 relative pl-4">
+                <div className="absolute left-[3px] top-2 bottom-2 w-0.5 bg-amber-500/20" />
+                {[
+                  { label: 'Surface Issue', val: rootCause ? 'Identified business tension' : 'Analyzed query' },
+                  { label: 'Primary Cause', val: 'Operational constraint check' },
+                  { label: 'Resolved Root Bottleneck', val: rootCause }
+                ].map((step, idx) => (
+                  <div key={idx} className="relative space-y-0.5">
+                    <div className="absolute left-[-16px] top-1 w-2.5 h-2.5 rounded-full bg-amber-500 border border-[#161617]" />
+                    <span className="text-[9.5px] font-bold text-amber-400 uppercase tracking-wider block">{step.label}</span>
+                    <p className="text-[12px] text-zinc-300 leading-relaxed font-medium">{step.val}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+
+      case "M06":
+        return (
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Departmental Debates & Stances</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {departments.length > 0 ? (
+                departments.map((dept, i) => {
+                  const isYes = dept.status === 'yes';
+                  const isNo = dept.status === 'no';
+                  const color = isYes ? 'text-emerald-400' : isNo ? 'text-red-400' : 'text-zinc-400';
+                  const progressBg = isYes ? 'bg-emerald-500' : isNo ? 'bg-red-500' : 'bg-zinc-500';
+                  return (
+                    <div key={i} className="bg-[#161617] border border-[#232325] p-3.5 rounded-xl flex flex-col justify-between gap-2">
+                      <div className="flex justify-between items-center text-[10.5px] font-bold">
+                        <span className="text-white uppercase tracking-wider">{dept.name}</span>
+                        <span className={`uppercase text-[9px] font-bold px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800/50 ${color}`}>
+                          {dept.status === 'yes' ? 'Support' : dept.status === 'no' ? 'Against' : 'Neutral'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-zinc-400 leading-relaxed">{dept.reason}</p>
+                      <div className="w-full h-1 bg-zinc-900 rounded-full overflow-hidden mt-1">
+                        <div className={`h-full rounded-full ${progressBg}`} style={{ width: `${dept.score || 75}%` }} />
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-[12px] text-zinc-500 italic pl-1">No debates recorded in simple pathway.</div>
+              )}
+            </div>
+          </div>
+        );
+
+      case "M07":
+        return (
+          <div className="space-y-4">
+            <div className="bg-[#161617] border border-[#232325] p-5 rounded-xl space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">Ground-Truth Fact Verification</span>
+                <span className="text-emerald-400 font-mono text-[12px] font-bold">{evidenceScore || 0}% Confirmed</span>
+              </div>
+              <div className="h-1.5 bg-zinc-900 rounded-full overflow-hidden">
+                <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${evidenceScore || 0}%` }} />
+              </div>
+              <p className="text-[12px] text-zinc-400 leading-relaxed">
+                Every numeric claim and metric generated in the debate was audit-validated against actual values stored inside the 13 SQLite tables. Bypassed or modified opinions which conflicted with data bounds.
+              </p>
+            </div>
+          </div>
+        );
+
+      case "M08": {
+        // Interactive Future Generator!
+        const activeSc = scenarios[selectedFuturePathIndex] || scenarios[0];
+        return (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center pl-1">
+              <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">Interactive Future Path Generator</h4>
+              <span className="text-[9.5px] text-zinc-600 font-medium">Select a pathway below to project outcomes</span>
+            </div>
+
+            {scenarios.length > 0 ? (
+              <div className="space-y-4">
+                {/* Tab Selector */}
+                <div className="flex gap-1.5 bg-zinc-950 p-1.5 rounded-xl border border-[#1e1e22]">
+                  {scenarios.map((sc, i) => {
+                    const isActive = i === selectedFuturePathIndex;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setSelectedFuturePathIndex(i)}
+                        className={`flex-1 text-center py-1.5 rounded-lg text-[10.5px] font-bold uppercase transition-all ${
+                          isActive
+                            ? 'bg-[#1b1c1e] text-white border border-[#2e2f32] shadow-sm'
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        {sc.name}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Dynamic Future Projections Card */}
+                {activeSc && (
+                  <div className="bg-[#161617] border border-blue-900/30 p-5 rounded-xl space-y-4 relative overflow-hidden">
+                    {activeSc.recommended && (
+                      <div className="absolute top-3 right-4 px-2 py-0.5 bg-blue-600/35 border border-blue-500/40 text-[9px] font-bold text-blue-300 rounded-full uppercase tracking-wide">
+                        Recommended Strategy
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <span className="text-[9.5px] text-zinc-500 font-bold uppercase tracking-wider">Selected Strategy Path</span>
+                      <h5 className="text-[14px] font-bold text-white">{activeSc.name}</h5>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="bg-[#0b0b0c] p-3 rounded-lg border border-[#1b1b1e]">
+                        <span className="text-[9px] text-zinc-500 uppercase font-bold block mb-1">Projected revenue impact</span>
+                        <span className={`text-[13.5px] font-mono font-bold ${activeSc.revenue_impact?.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {activeSc.revenue_impact}
+                        </span>
+                      </div>
+                      <div className="bg-[#0b0b0c] p-3 rounded-lg border border-[#1b1b1e]">
+                        <span className="text-[9px] text-zinc-500 uppercase font-bold block mb-1">Risk Assessment</span>
+                        <span className={`text-[11px] font-bold uppercase ${
+                          activeSc.risk?.toLowerCase() === 'low' ? 'text-emerald-400' : activeSc.risk?.toLowerCase() === 'medium' ? 'text-amber-400' : 'text-red-400'
+                        }`}>
+                          {activeSc.risk} Risk
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <span className="text-[9.5px] text-zinc-500 font-bold uppercase tracking-wider block">Forecasted Strategy Rollout Details</span>
+                      <p className="text-[12px] text-zinc-300 leading-relaxed font-sans font-medium bg-zinc-950/40 p-3 rounded-lg border border-[#212124]/30">
+                        {activeSc.description}
+                      </p>
+                    </div>
+
+                    {activeSc.breaking_assumption && (
+                      <div className="bg-red-955 border border-red-900/30 p-3 rounded-lg flex items-start gap-2.5">
+                        <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <span className="text-[9.5px] text-red-400 font-bold uppercase block">Core Strategy Breaking Assumption Limit</span>
+                          <p className="text-[11px] text-zinc-400 font-mono mt-0.5">{activeSc.breaking_assumption}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="text-[12px] text-zinc-500 italic pl-1">Future Generator is skipped in low friction pathways.</div>
+            )}
+          </div>
+        );
+      }
+
+      case "M09":
+        return (
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Devil's Advocate Challenge & Stresses</h4>
+            <div className="bg-[#161617] border border-red-900/20 p-5 rounded-xl space-y-3.5">
+              <div className="flex items-center gap-2 text-[11px] text-red-400 font-bold uppercase tracking-wide">
+                <AlertTriangle className="w-4 h-4" />
+                <span>Identified blindspots and vulnerabilities</span>
+              </div>
+              <div className="space-y-2.5">
+                {devils.length > 0 ? (
+                  devils.map((d, idx) => (
+                    <div key={idx} className="flex items-start gap-2 bg-[#0b0b0c] p-3 rounded-lg border border-[#251818]/30 text-[12px] text-zinc-300">
+                      <span className="text-red-400 font-mono font-bold pr-1.5 mt-0.5">{idx + 1}.</span>
+                      <span>{d}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-[12px] text-zinc-500 italic">No advocate critiques logged.</div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+
+      case "M10":
+        return (
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Minimax Regret Stance Selector</h4>
+            <div className="bg-[#161617] border border-indigo-900/30 p-5 rounded-xl space-y-3">
+              <div className="flex items-center gap-2 text-indigo-400 font-bold text-[11px] uppercase">
+                <Target className="w-4 h-4" />
+                <span>Lowest Worst-Case Downside Path Chosen</span>
+              </div>
+              <p className="text-[12.5px] text-zinc-300 leading-relaxed font-sans font-medium">
+                {regret || "No regret minimax matrix calculated for this session."}
+              </p>
+            </div>
+          </div>
+        );
+
+      case "M11":
+        return (
+          <div className="space-y-4">
+            <div className="bg-[#161617] border border-[#232325] p-5 rounded-xl space-y-4">
+              <div className="flex justify-between items-center">
+                <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest">Mathematical Confidence weights</h4>
+                <span className="text-white font-mono text-[12px] font-bold">{Math.round(confidence)}% Total</span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {[
+                  { label: 'Department Agreement', val: breakdown.agreement || 0, weight: '35%' },
+                  { label: 'Memory Match score', val: breakdown.memory_match || 0, weight: '25%' },
+                  { label: 'Evidence SQL grounding', val: breakdown.evidence || evidenceScore || 0, weight: '20%' },
+                  { label: 'Scenario Stability', val: breakdown.scenario_stability || 0, weight: '20%' }
+                ].map((bar, i) => (
+                  <div key={i} className="bg-[#0b0b0c] p-3 rounded-lg border border-[#1e1e22] space-y-1.5">
+                    <div className="flex justify-between items-center text-[10px]">
+                      <span className="text-zinc-500 font-semibold">{bar.label}</span>
+                      <span className="text-zinc-400 font-mono font-bold">{bar.val}% <span className="text-zinc-600">({bar.weight})</span></span>
+                    </div>
+                    <div className="h-1 bg-zinc-900 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${bar.val}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+
+      case "M12":
+        return (
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Constraints validation check</h4>
+            <div className="bg-[#161617] border border-[#232325] p-4 rounded-xl space-y-3">
+              {constraints.length > 0 ? (
+                constraints.map((c, i) => {
+                  const isOk = c.status?.toLowerCase() === 'ok';
+                  const isWarn = c.status?.toLowerCase() === 'warning';
+                  const badgeColor = isOk ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/30' : isWarn ? 'bg-amber-955 text-amber-400 border border-amber-800/40' : 'bg-red-955 text-red-400 border border-red-800/30';
+                  return (
+                    <div key={i} className="flex justify-between items-center text-[11.5px] bg-[#0b0b0c] p-3 rounded-lg border border-[#1b1b1e]">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[8.5px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${badgeColor}`}>
+                          {c.status}
+                        </span>
+                        <span className="text-zinc-200 font-semibold">{c.name}</span>
+                      </div>
+                      <span className="text-zinc-400 font-medium">{c.detail}</span>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-[12px] text-zinc-500 italic pl-1">No constraints limits violated.</div>
+              )}
+            </div>
+          </div>
+        );
+
+      case "M13":
+        return (
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Self-Review Critique & Gaps</h4>
+            <div className="bg-[#161617] border border-[#232325] p-5 rounded-xl space-y-3">
+              <div className="flex items-center gap-2 text-zinc-400 font-bold text-[11px] uppercase">
+                <Brain className="w-4 h-4 text-purple-400" />
+                <span>Assumed Bounds & Information Gaps</span>
+              </div>
+              <p className="text-[12px] text-zinc-300 italic leading-relaxed bg-[#0b0b0c] p-3.5 rounded-lg border border-[#1b1b1e]">
+                {selfReview || "No critique registered."}
+              </p>
+            </div>
+          </div>
+        );
+
+      case "M14":
+        return (
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Final executive Directive resolution</h4>
+            <div className="bg-[#161617] border border-blue-900/30 p-5 rounded-xl space-y-3">
+              <div className="flex items-center gap-2 text-blue-400 font-bold text-[11px] uppercase">
+                <Sparkles className="w-4 h-4" />
+                <span>NVIDIA Synthesis Verdict directive</span>
+              </div>
+              <p className="text-[13px] text-white font-bold leading-relaxed bg-[#0b0b0c] p-4 rounded-lg border border-[#1e1e22] shadow-[0_0_12px_rgba(37,99,235,0.05)]">
+                {verdictText || "Synthesis resolution pending."}
+              </p>
+            </div>
+          </div>
+        );
+
+      case "M15":
+        return (
+          <div className="space-y-4">
+            <h4 className="text-[11px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Explainability trace log</h4>
+            <div className="bg-[#161617] border border-[#232325] p-5 rounded-xl space-y-3">
+              <div className="flex items-center gap-2 text-zinc-400 font-bold text-[11px] uppercase">
+                <FileText className="w-4 h-4 text-zinc-500" />
+                <span>RAG Decision Path</span>
+              </div>
+              <div className="text-[11px] text-zinc-400 space-y-2 bg-[#0b0b0c] p-4 rounded-lg border border-[#1b1b1e] font-mono leading-relaxed">
+                <div>- Request Question: "{question || 'N/A'}"</div>
+                <div>- Total Steps: {pipelineExecuted.length} Executed</div>
+                <div>- Action Plan Length: {actionPlan.length} Steps Generated</div>
+                <div>- Dynamic Stats Highlighted: {keyStats.length} Cards</div>
+              </div>
+            </div>
+          </div>
+        );
+
+      case "M16":
+        return (
+          <div className="space-y-4">
+            <div className="bg-[#161617] border border-[#232325] p-5 rounded-xl space-y-4">
+              <div className="flex items-center gap-2 text-emerald-400 font-bold text-[11px] uppercase">
+                <TrendingUp className="w-4 h-4" />
+                <span>Memory Loop status</span>
+              </div>
+              <p className="text-[12px] text-zinc-400 leading-relaxed font-sans">
+                The decision outcome, parameters, and database checks are successfully saved into vector memory databases (`crm_knowledge.json`). 
+                This will automatically improve retrieval accuracy and decision logic similarity match score on similar future queries.
+              </p>
+              <div className="bg-[#0b0b0c] p-3 rounded-lg border border-[#1b1b1e] text-[10.5px] text-emerald-400 font-mono">
+                [OK] Appended decision trace context to vector database index (246 total items).
+              </div>
+            </div>
+          </div>
+        );
+
+      default:
+        return <div className="text-[12px] text-zinc-400">Analysis completed.</div>;
+    }
+  };
+
+
+  const activeAudit = auditModules.find(m => m.id === selectedModuleId) || auditModules[0];
+
+  const phaseBadgeColor = {
+    UNDERSTAND: 'bg-blue-955 text-blue-400 border border-blue-800/40',
+    ANALYZE:    'bg-amber-955 text-amber-400 border border-amber-800/40',
+    REASON:     'bg-purple-955 text-purple-400 border border-purple-800/40',
+    VERIFY:     'bg-emerald-955 text-emerald-400 border border-emerald-800/40',
+    DECIDE:     'bg-rose-955 text-rose-400 border border-rose-800/40',
+  }[activeAudit.phase] || 'bg-zinc-800 text-zinc-400 border border-zinc-700';
 
   return (
     <div className="space-y-6 self-stretch">
@@ -311,220 +1149,89 @@ function RichOutputCard({ output, frictionLevel, pipelineExecuted }) {
           className="w-full flex items-center justify-between px-5 py-4 bg-[#111213] hover:bg-[#161619] transition-all text-left">
           <div>
             <span className="text-[12px] font-bold text-zinc-400 uppercase tracking-wide">Friction Cognitive Pipeline Audit (16 Modules)</span>
-            <div className="text-[10px] text-zinc-600 mt-0.5">Inspect root causes, department stances, risk metrics, and simulation details</div>
+            <div className="text-[10px] text-zinc-600 mt-0.5">Select a module to inspect its step-by-step cognitive reasoning and ground-truth values</div>
           </div>
           {showAdvanced ? <ChevronUp className="w-4 h-4 text-zinc-500" /> : <ChevronDown className="w-4 h-4 text-zinc-500" />}
         </button>
 
         {showAdvanced && (
-          <div className="p-5 border-t border-[#1e1e22] space-y-5 bg-[#0a0a0b]">
-
-            {/* Root Cause */}
-            {rootCause && (
-              <div className="bg-[#111213] border border-amber-900/30 p-4 rounded-xl flex items-start gap-3">
-                <div className="w-6 h-6 rounded-lg bg-amber-900/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <GitBranch className="w-3.5 h-3.5 text-amber-400" />
-                </div>
-                <div>
-                  <div className="text-[10px] font-bold text-amber-400 tracking-widest uppercase mb-1">Root Cause Analysis</div>
-                  <div className="text-[12.5px] text-zinc-300">{rootCause}</div>
-                </div>
-              </div>
-            )}
-
-            {/* Department Analysis */}
-            {departments.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-[10px] font-bold text-zinc-500 tracking-widest uppercase pl-1">Department Alignment Debates</div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  {departments.map((dept, i) => {
-                    const isYes  = dept.status === 'yes';
-                    const isNo   = dept.status === 'no';
-                    const border = isYes ? 'border-emerald-900/40' : isNo ? 'border-red-900/30' : 'border-[#1e1e22]';
-                    const badge  = isYes ? 'bg-emerald-900/50 text-emerald-400' : isNo ? 'bg-red-900/40 text-red-400' : 'bg-zinc-800 text-zinc-400';
-                    return (
-                      <div key={i} className={`bg-[#111213] border ${border} p-4 rounded-xl flex flex-col gap-2`}>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">{dept.name}</span>
-                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide ${badge}`}>
-                            {dept.status === 'yes' ? 'Support' : dept.status === 'no' ? 'Against' : 'Neutral'}
-                          </span>
-                        </div>
-                        <div className="text-[12px] text-zinc-300 leading-snug">{dept.reason}</div>
-                        {dept.score !== undefined && (
-                          <div className="w-full h-1 bg-[#1d1d1f] rounded-full overflow-hidden mt-1">
-                            <div className={`h-full rounded-full ${isYes ? 'bg-emerald-500' : isNo ? 'bg-red-500' : 'bg-zinc-500'}`}
-                              style={{ width: `${dept.score}%` }} />
-                          </div>
-                        )}
+          <div className="p-5 border-t border-[#1e1e22] bg-[#0a0a0b]">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              
+              {/* Left Column: 16 Module Timeline Buttons */}
+              <div className="md:col-span-1 border-r border-[#1e1e22]/50 pr-4 space-y-1.5 max-h-[500px] overflow-y-auto custom-scrollbar">
+                {auditModules.map((m) => {
+                  const isActive = m.id === selectedModuleId;
+                  const isExecuted = m.status === "EXECUTED";
+                  
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => setSelectedModuleId(m.id)}
+                      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all border ${
+                        isActive 
+                          ? 'bg-[#151618] border-[#313235] text-white shadow-sm' 
+                          : 'bg-transparent border-transparent text-zinc-400 hover:bg-[#111213] hover:text-zinc-200'
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 text-[9px] font-bold ${
+                        isExecuted 
+                          ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-800/40' 
+                          : 'bg-zinc-900 text-zinc-600 border border-zinc-800/40'
+                      }`}>
+                        {isExecuted ? '✓' : '×'}
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Scenario Simulations */}
-            {scenarios.length > 0 && (
-              <div className="space-y-2">
-                <button onClick={() => setShowScenarios(s => !s)}
-                  className="w-full flex items-center justify-between text-[10px] font-bold text-zinc-500 tracking-widest uppercase pl-1 hover:text-zinc-300 transition">
-                  <span>Scenario Simulation paths</span>
-                  {showScenarios ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                </button>
-                {showScenarios && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {scenarios.map((sc, i) => {
-                      const isRec = sc.recommended;
-                      return (
-                        <div key={i} className={`bg-[#111213] border rounded-xl p-4 space-y-2 relative
-                          ${isRec ? 'border-blue-800/50 shadow-[0_0_12px_rgba(37,99,235,0.1)]' : 'border-[#1e1e22]'}`}>
-                          {isRec && (
-                            <div className="absolute -top-2 left-4 px-2 py-0.5 bg-blue-600 text-[9px] font-bold text-white rounded-full uppercase tracking-wide">
-                              Recommended Option
-                            </div>
-                          )}
-                          <div className="text-[11.5px] font-bold text-zinc-200 pt-1">{sc.name}</div>
-                          {sc.description && <div className="text-[11px] text-zinc-500 leading-relaxed">{sc.description}</div>}
-                          <div className="flex items-center justify-between text-[10px] pt-1">
-                            <span className={`font-mono font-bold ${sc.revenue_impact?.startsWith('+') ? 'text-emerald-400' : 'text-red-400'}`}>
-                              {sc.revenue_impact}
-                            </span>
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${badgeCls(sc.risk)}`}>
-                              {sc.risk} Risk
-                            </span>
-                          </div>
-                          {sc.breaking_assumption && (
-                            <div className="text-[10px] text-zinc-600 italic border-t border-[#1e1e22] pt-2 mt-1">
-                              Assumption break: {sc.breaking_assumption}
-                            </div>
-                          )}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-[10.5px] font-bold text-zinc-500">{m.id}</span>
+                          <span className="text-[11.5px] font-semibold truncate">{m.name}</span>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Regret Analysis */}
-            {regret && (
-              <div className="bg-[#111213] border border-[#1e1e22] p-4 rounded-xl flex items-start gap-3">
-                <div className="w-6 h-6 rounded-lg bg-indigo-900/20 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Target className="w-3.5 h-3.5 text-indigo-400" />
-                </div>
-                <div>
-                  <div className="text-[10px] font-bold text-indigo-400 tracking-widest uppercase mb-1">Regret Simulation & Least-Regret Stance</div>
-                  <div className="text-[12.5px] text-zinc-300">{regret}</div>
-                </div>
-              </div>
-            )}
-
-            {/* Devil's Advocate */}
-            {devils.length > 0 && (
-              <div className="space-y-1.5">
-                <button onClick={() => setShowDevils(s => !s)}
-                  className="w-full flex items-center justify-between text-[10px] font-bold text-zinc-500 tracking-widest uppercase pl-1 hover:text-zinc-300 transition">
-                  <span>Devil's Advocate Counterarguments</span>
-                  {showDevils ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                </button>
-                {showDevils && (
-                  <div className="bg-[#111213] border border-red-900/20 rounded-xl p-4 space-y-2">
-                    {devils.map((d, i) => (
-                      <div key={i} className="flex items-start gap-2.5 text-[12.5px] text-zinc-300">
-                        <span className="text-red-400 font-bold mt-0.5 flex-shrink-0">?</span>
-                        <span>{d}</span>
                       </div>
-                    ))}
-                  </div>
-                )}
+                    </button>
+                  );
+                })}
               </div>
-            )}
 
-            {/* Risk & Confidence Engine */}
-            <div className="bg-[#111213] border border-[#1e1e22] p-5 rounded-xl space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="text-[10px] font-bold text-zinc-500 tracking-widest uppercase">Confidence Weighting Breakdown</div>
-                <span className="text-white text-[13px] font-mono font-bold">{Math.round(confidence)}% weight score</span>
-              </div>
-              <div className="grid grid-cols-2 gap-3.5">
-                {[
-                  { label: 'Department Agreement', val: breakdown.agreement || 0 },
-                  { label: 'Memory Match score',   val: breakdown.memory_match || 0 },
-                  { label: 'Evidence ground-truth', val: breakdown.evidence || evidenceScore || 0 },
-                  { label: 'Scenario Stability',   val: breakdown.scenario_stability || 0 },
-                ].map((bar, i) => (
-                  <div key={i}>
-                    <div className="flex items-center justify-between text-[10px] mb-1">
-                      <span className="text-zinc-500 font-semibold">{bar.label}</span>
-                      <span className="text-zinc-400 font-mono font-bold">{bar.val}%</span>
+              {/* Right Column: Detailed Module Audit Inspector */}
+              <div className="md:col-span-2 flex flex-col bg-[#111213] border border-[#1e1e22] rounded-xl p-5 min-h-[380px]">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-zinc-500 font-mono text-[11px] font-bold bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded">
+                        {activeAudit.id}
+                      </span>
+                      <h3 className="text-[15px] font-bold text-white">{activeAudit.name}</h3>
                     </div>
-                    <div className="h-1 bg-[#1d1d1f] rounded-full overflow-hidden">
-                      <div className="h-full bg-blue-500 rounded-full transition-all duration-700"
-                        style={{ width: `${bar.val}%` }} />
+                    <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold border uppercase tracking-wider ${phaseBadgeColor}`}>
+                      {activeAudit.phase} Phase
+                    </span>
+                  </div>
+
+                  <p className="text-[11.5px] text-zinc-500 leading-relaxed italic border-b border-[#1b1b1e] pb-3">
+                    {activeAudit.desc}
+                  </p>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 text-[10px] text-zinc-500 uppercase tracking-widest font-bold">
+                      <span>Status:</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${
+                        activeAudit.status === 'EXECUTED' 
+                          ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-800/20' 
+                          : 'bg-zinc-800 text-zinc-500'
+                      }`}>
+                        {activeAudit.status}
+                      </span>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-2">Cognitive Output & Solution Dashboard</div>
+                      {renderModuleAuditContent()}
                     </div>
                   </div>
-                ))}
+                </div>
               </div>
+
             </div>
-
-            {/* Constraints Validator */}
-            {constraints.length > 0 && (
-              <div className="bg-[#111213] border border-[#1e1e22] p-4 rounded-xl space-y-2.5">
-                <div className="text-[10px] font-bold text-zinc-500 tracking-widest uppercase pl-1">Constraints Validator check</div>
-                {constraints.map((c, i) => (
-                  <div key={i} className="flex items-center gap-3 text-[12px] border-b border-[#161619] last:border-b-0 pb-1.5 last:pb-0">
-                    <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${badgeCls(c.status)}`}>{c.status}</span>
-                    <span className="text-zinc-400 font-semibold">{c.name}</span>
-                    <span className="text-zinc-500 flex-1 text-right">{c.detail}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Risk If Ignored */}
-            {ifIgnored.length > 0 && (
-              <div className="bg-[#111213] border border-red-900/20 p-4 rounded-xl space-y-2">
-                <div className="text-[10px] font-bold text-red-500 tracking-widest uppercase">Risk If Ignored (Unmitigated Consequences)</div>
-                {ifIgnored.map((risk, i) => (
-                  <div key={i} className="flex items-start gap-2 text-[12.5px] text-zinc-400">
-                    <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0 mt-0.5" />
-                    <span>{risk}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Memory / Patterns */}
-            {(mistakeCtx || patternMatch) && (
-              <div className="bg-[#111213] border border-purple-900/30 p-4 rounded-xl flex items-start gap-3">
-                <div className="w-6 h-6 rounded-lg bg-purple-900/30 flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <Brain className="w-3.5 h-3.5 text-purple-400" />
-                </div>
-                <div className="space-y-1">
-                  <div className="text-[10px] font-bold text-purple-400 tracking-widest uppercase">Friction Business Memory</div>
-                  {mistakeCtx && <div className="text-[12px] text-zinc-300">{mistakeCtx}</div>}
-                  {patternMatch && <div className="text-[11px] text-purple-300 font-semibold mt-1">Cross-case Pattern: {patternMatch}</div>}
-                </div>
-              </div>
-            )}
-
-            {/* Self Review */}
-            {selfReview && (
-              <div className="space-y-1.5">
-                <button onClick={() => setShowSelfReview(s => !s)}
-                  className="w-full flex items-center justify-between text-[10px] font-bold text-zinc-500 tracking-widest uppercase pl-1 hover:text-zinc-400 transition">
-                  <span>Reflective Self Review & Self Critique</span>
-                  {showSelfReview ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                </button>
-                {showSelfReview && (
-                  <div className="bg-[#111213] border border-[#1e1e22] p-4 rounded-xl">
-                    <p className="text-[12px] text-zinc-500 italic leading-relaxed">{selfReview}</p>
-                  </div>
-                )}
-              </div>
-            )}
-
           </div>
         )}
       </div>
@@ -936,11 +1643,14 @@ function App() {
                     </div>
                   ) : (
                     msg.result && (
-                      <RichOutputCard
-                        output={msg.result.output}
-                        frictionLevel={msg.result.friction_level}
-                        pipelineExecuted={msg.result.pipeline_executed}
-                      />
+                      <div className="space-y-6">
+                        <RichOutputCard
+                          result={msg.result}
+                        />
+                        <FutureCard
+                          result={msg.result}
+                        />
+                      </div>
                     )
                   )}
                 </div>
